@@ -4,7 +4,7 @@ Update **Voicemeeter** (Standard, Banana, Potato) and **VB-Audio Matrix** (Matri
 
 VB-Audio's recommended way to update is *uninstall → restart → install → restart*. This PowerShell script uninstalls the old version and installs the new one in the same Windows session, for every VB-Audio product it finds. After that, **a single restart** finishes the job, and you choose whether it happens now or later.
 
-> **🧪 Beta.** Fully tested on Voicemeeter **Potato** (Windows 11 x64). Standard, Banana, Matrix and Matrix Coconut are supported but not fully tested yet (see [Tested](#tested)). If something goes wrong, please [open an issue](../../issues) and attach the log from `%LOCALAPPDATA%\VoicemeeterUpdater`.
+> **🧪 Beta.** Every edition was tested on real updates in a Windows 11 VM (see [Tested](#tested)). If something goes wrong on your PC, please [open an issue](../../issues) and attach the log from `%LOCALAPPDATA%\VoicemeeterUpdater`.
 
 > Not affiliated with VB-Audio. Voicemeeter and Matrix are © Vincent Burel / VB-Audio Software. This script only automates the official installer downloaded from [vb-audio.com](https://vb-audio.com/Voicemeeter/).
 
@@ -97,12 +97,22 @@ The edition only changes when you ask for it with `-Edition`. If neither Voiceme
 
 ## Tested
 
-- Windows 11 x64, Voicemeeter **Potato** 3.1.2.2 → 3.1.3.0, including the automatic device-name repair.
-- **Standard** and **Banana**: package detection, download links, signatures and silent-install switches are checked, but a full update has not been run yet.
-- **Matrix / Matrix Coconut** (experimental): detection, download links, signatures and silent-install switches are checked, but a full update has not been run yet.
+On a Windows 11 x64 VM, with real updates from older official packages, each time with a restart and the post-restart check:
 
-Feedback is welcome.
+| Update | App using the devices during the update¹ | Result |
+|---|---|---|
+| Voicemeeter **Potato** 3.1.2.2 → 3.1.3.0 | no | ✅ |
+| Voicemeeter **Potato** 3.1.1.9 → 3.1.3.0 (driver 3.3.1.9 → 3.4.1.9) | yes | ✅ no crash, 16/16 devices named |
+| Voicemeeter **Banana** 2.1.2.2 → 2.1.3.0 | yes | ✅ stays Banana |
+| Voicemeeter **Standard** 1.1.2.2 → 1.1.3.0 | yes | ✅ |
+| **Matrix** 1.0.2.5 → 1.0.2.6 | no | ✅ |
+| **Matrix Coconut** 2.0.2.5 → 2.0.2.6 | no | ✅ stays Coconut |
+| Potato 3.1.1.9 **+** Matrix 1.0.2.5 together | yes | ✅ both updated, one restart |
+| Potato **3.0.1.0** (old 3-driver system) → 3.1.3.0 | no | ✅ clean migration to the single driver |
 
+Also used for real on 3 PCs (Potato 3.1.2.2 → 3.1.3.0).
+
+¹ A test app recording from "Voicemeeter Out B1" and playing to "Voicemeeter Input", like Discord or a game would. Before the v1.1.0-beta fix, this made Windows crash (blue screen `0xD1` in the old VAIO driver).
 ## Credits
 
 Made by [Taimauurufu](https://github.com/Taimauurufu), co-written with **Claude** (Anthropic's AI assistant), including the investigation of the device-name problem.

@@ -23,7 +23,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%VMU_PS1%" %*
 exit /b
 #PS1-BELOW
 <#
-    Voicemeeter Updater  v1.1.0-beta
+    Voicemeeter Updater  v1.1.1-beta
     https://github.com/Taimauurufu/Voicemeeter-Updater
 
     Updates VB-Audio Voicemeeter (Standard, Banana, Potato) and VB-Audio Matrix (Matrix, Coconut)
@@ -77,7 +77,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference    = 'SilentlyContinue'
-$Version = '1.1.0-beta'
+$Version = '1.1.1-beta'
 
 # ---------------------------------------------------------------- elevation
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -163,6 +163,8 @@ function Find-Edition([string]$setupName) {
     }
     $null
 }
+# "Matrix Matrix" -> "Matrix", "Voicemeeter Potato" stays
+function Get-Label([string]$product, [string]$edition) { if ($product -eq $edition) { $product } else { "$product $edition" } }
 function Get-ProductOf([string]$edition) { $Products.Keys | Where-Object { $Products[$_].Editions.Contains($edition) } | Select-Object -First 1 }
 
 # every VB-Audio product installed, with its edition and version
@@ -368,7 +370,7 @@ function Uninstall-Install([string]$product, $inst, [string]$setupExe) {
             Log 'Stopping Windows audio during the driver swap (every app loses sound for a few seconds)...'
             Stop-WindowsAudio
             $audioStopped = $true
-            Log "Uninstalling $product $($inst.Edition) $($inst.Version) (silent)..."
+            Log "Uninstalling $(Get-Label $product $inst.Edition) $($inst.Version) (silent)..."
             Start-Process $inst.Setup -ArgumentList '-u', '-h' -WorkingDirectory $inst.Dir -Wait
             Wait-Setup
             # a leftover virtual device of this product would make the installer refuse to install
@@ -534,7 +536,7 @@ if (Test-RestartPending) {
 
 $installed = @(Get-Installed)
 foreach ($i in $installed) {
-    Log "Installed : $($i.Product) $($i.Edition) $($i.Version)"
+    Log "Installed : $(Get-Label $i.Product $i.Edition) $($i.Version)"
     if ($i.EditionByExe -and $i.EditionByExe -ne $i.Edition) {
         Log "            (programs of $($i.EditionByExe) found too; the registered edition $($i.Edition) is kept)" DarkGray
     }
@@ -572,11 +574,11 @@ foreach ($t in $targets) {
                 else { 'none' }
     $lat = if ($t.Latest.Version) { $t.Latest.Version } else { $t.Latest.Zip }
     switch ($t.Action) {
-        'none'      { Log "Latest    : $($t.Product) $($t.Edition) $lat -> up to date" Green }
-        'update'    { Log "Latest    : $($t.Product) $($t.Edition) $lat -> UPDATE available" Yellow }
-        'reinstall' { Log "Latest    : $($t.Product) $($t.Edition) $lat -> will be reinstalled (-Force)" Yellow }
-        'install'   { Log "Latest    : $($t.Product) $($t.Edition) $lat -> will be INSTALLED" Yellow }
-        'switch'    { Log "Latest    : $($t.Product) $($t.Edition) $lat -> will REPLACE $($t.Inst.Edition)" Yellow }
+        'none'      { Log "Latest    : $(Get-Label $t.Product $t.Edition) $lat -> up to date" Green }
+        'update'    { Log "Latest    : $(Get-Label $t.Product $t.Edition) $lat -> UPDATE available" Yellow }
+        'reinstall' { Log "Latest    : $(Get-Label $t.Product $t.Edition) $lat -> will be reinstalled (-Force)" Yellow }
+        'install'   { Log "Latest    : $(Get-Label $t.Product $t.Edition) $lat -> will be INSTALLED" Yellow }
+        'switch'    { Log "Latest    : $(Get-Label $t.Product $t.Edition) $lat -> will REPLACE $($t.Inst.Edition)" Yellow }
     }
 }
 
@@ -585,7 +587,7 @@ if (-not $todo) { Log 'Everything is up to date. Nothing to do.' Green; Done }
 if ($CheckOnly) { Log 'Run the script without -CheckOnly to install the update(s).' Yellow; Done }
 
 Write-Host ''
-$names = ($todo | ForEach-Object { "$($_.Product) $($_.Edition)" }) -join ' + '
+$names = ($todo | ForEach-Object { "$(Get-Label $_.Product $_.Edition)" }) -join ' + '
 Write-Host "About to install: $names" -ForegroundColor Cyan
 Write-Host 'These apps will be closed: audio going through them stops until Windows is restarted.' -ForegroundColor Yellow
 if (-not $Yes -and (Read-Host 'Continue? (Y/N)').Trim() -notmatch '^[yYoO]') { Log 'Cancelled.'; Done }
@@ -632,7 +634,7 @@ foreach ($t in $todo) {
     }
     Log "  audio devices visible now: $(@(Get-ProductEndpoints $t.Product).Count)"
     if ($now -and $now.Edition -eq $t.Edition -and $now.Version -eq $t.NewVersion) {
-        Log "$($t.Product) $($t.Edition) $($t.NewVersion) installed." Green
+        Log "$(Get-Label $t.Product $t.Edition) $($t.NewVersion) installed." Green
     } else {
         # Fallback: the installer can refuse while the old driver is still loaded -> install at next boot
         Log "$($t.Product): the installer did not finish now, it will run automatically at the next Windows start." Yellow
@@ -665,6 +667,6 @@ Get-ChildItem $Data -Directory -Filter 'backup_*' | Sort-Object Name -Descending
 # ---------------------------------------------------------------- 7. restart
 Log ''
 Log 'Update done. ONE restart is needed to load the new audio driver(s).' Cyan
-$done = ($todo | ForEach-Object { "$($_.Product) $($_.Edition) $($_.NewVersion)" }) -join "`n"
+$done = ($todo | ForEach-Object { "$(Get-Label $_.Product $_.Edition) $($_.NewVersion)" }) -join "`n"
 Ask-Restart "Installed:`n$done`n`nWindows must be restarted to finish the update (audio drivers).`nSave your work first.`n`nRestart now?`n`nYes = restart now`nNo = restart later"
 Done

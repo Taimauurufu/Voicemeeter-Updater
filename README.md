@@ -1,12 +1,12 @@
 # Voicemeeter Updater
 
-Update **Voicemeeter** (Standard, Banana or Potato) with **one restart instead of two**.
+Update **Voicemeeter** (Standard, Banana, Potato) and **VB-Audio Matrix** (Matrix, Coconut) with **one restart instead of two**.
 
-VB-Audio's recommended way to update is *uninstall → restart → install → restart*. This PowerShell script uninstalls the old version and installs the new one in the same Windows session. After that, **a single restart** finishes the job, and you choose whether it happens now or later.
+VB-Audio's recommended way to update is *uninstall → restart → install → restart*. This PowerShell script uninstalls the old version and installs the new one in the same Windows session, for every VB-Audio product it finds. After that, **a single restart** finishes the job, and you choose whether it happens now or later.
 
-> **🧪 Beta.** Fully tested on Voicemeeter **Potato** (Windows 11 x64). Standard and Banana are supported but not fully tested yet, and more Voicemeeter versions will be added later. If something goes wrong, please [open an issue](../../issues) and attach the log from `%LOCALAPPDATA%\VoicemeeterUpdater`.
+> **🧪 Beta.** Fully tested on Voicemeeter **Potato** (Windows 11 x64). Standard, Banana, Matrix and Matrix Coconut are supported but not fully tested yet (see [Tested](#tested)). If something goes wrong, please [open an issue](../../issues) and attach the log from `%LOCALAPPDATA%\VoicemeeterUpdater`.
 
-> Not affiliated with VB-Audio. Voicemeeter is © Vincent Burel / VB-Audio Software. This script only automates the official installer downloaded from [vb-audio.com](https://vb-audio.com/Voicemeeter/).
+> Not affiliated with VB-Audio. Voicemeeter and Matrix are © Vincent Burel / VB-Audio Software. This script only automates the official installer downloaded from [vb-audio.com](https://vb-audio.com/Voicemeeter/).
 
 ---
 
@@ -36,20 +36,20 @@ Both files do exactly the same thing: `tools\Build-Bat.ps1` builds the `.bat` fr
 
 | Step | Details |
 |---|---|
-| 1. Check | Finds your installed edition and version, and reads the latest one on vb-audio.com. It stops here if you are up to date. |
-| 2. Download | Gets the **official** package and checks that the installer carries **VB-Audio's digital signature**. It refuses to continue otherwise. |
-| 3. Backup | Saves `Documents\Voicemeeter` (settings, scenes, Macro Buttons…), the **current live configuration** (exported through Voicemeeter's Remote API) and the "run at startup" shortcut. |
-| 4. Close | Asks Voicemeeter to shut down through its Remote API, so your last changes are saved. It then closes Macro Buttons, VBAN2MIDI and the other tools from the Voicemeeter folder. |
-| 5. Update | Runs a silent uninstall, then a silent install of the new version. |
+| 1. Check | Finds every VB-Audio product installed (Voicemeeter and/or Matrix) with its **edition** and version, and reads the latest one on vb-audio.com. Each product is updated **in its own edition**: a Banana user gets Banana, never Potato. It stops here if everything is up to date. |
+| 2. Download | Gets the **official** packages and checks that the installer carries **VB-Audio's digital signature**. It refuses to continue otherwise. |
+| 3. Backup | Saves `Documents\Voicemeeter` (settings, scenes, Macro Buttons…) and the Matrix settings folder, the **current live Voicemeeter configuration** (exported through its Remote API) and the "run at startup" shortcuts. |
+| 4. Close | Asks Voicemeeter to shut down through its Remote API, so your last changes are saved. It then closes Matrix, Macro Buttons, VBAN2MIDI and the other tools from the VB-Audio folders. |
+| 5. Update | Runs a silent uninstall, then a silent install of each new version. |
 | 6. Restore | Puts back the startup shortcut, which the uninstaller deletes, and any settings file that disappeared. Nothing is overwritten. |
 | 7. Restart | Asks **restart now or later**. |
-| 8. After the restart | Checks the Voicemeeter audio devices once, at your next logon, and repairs them if needed (see below). |
+| 8. After the restart | Checks the virtual audio devices once, at your next logon, and repairs them if needed (see below). |
 
 **Never touched:** VB-CABLE, VB-CABLE A+B / C+D, Hi-Fi Cable, and third-party tools such as Equalizer APO.
 
 ### The "all devices are called Speakers" problem
 
-When an update also changes the version of the **Voicemeeter VAIO driver**, Windows keeps the old driver loaded until the restart. The new audio devices then only appear **after** the restart, which is too late for the installer to give them their names. The result:
+When an update also changes the version of the **Voicemeeter VAIO driver** (Matrix has the same kind of driver), Windows keeps the old driver loaded until the restart. The new audio devices then only appear **after** the restart, which is too late for the installer to give them their names. The result:
 
 - all Voicemeeter outputs are named **"Speakers (VB-Audio Voicemeeter VAIO)"**, and the inputs "Voicemeeter Out 1…8";
 - VB-Audio's `VBDeviceCheck.exe` reports `Pin Name redundancy`;
@@ -64,11 +64,11 @@ Run these from a PowerShell window:
 ```powershell
 .\Update-Voicemeeter.bat -CheckOnly          # only tell me if an update is available
 .\Update-Voicemeeter.bat -Force              # reinstall even if up to date (also fixes broken device names)
-.\Update-Voicemeeter.bat -Edition Potato     # install or switch edition: Standard | Banana | Potato
+.\Update-Voicemeeter.bat -Edition Potato     # install or switch edition: Standard | Banana | Potato | Matrix | Coconut
 ```
 The same options work with `Update-Voicemeeter.ps1`.
 
-If Voicemeeter is not installed, the script asks which edition to install.
+The edition only changes when you ask for it with `-Edition`. If neither Voicemeeter nor Matrix is installed, the script asks what to install.
 
 ## Files and traces
 
@@ -77,7 +77,7 @@ If Voicemeeter is not installed, the script asks which edition to install.
 | `%LOCALAPPDATA%\VoicemeeterUpdater` | Logs (`update_<date>.log`), the last 3 backups, and a copy of the script + installer until the post-restart check has run |
 | `%TEMP%\VoicemeeterUpdater` | Downloaded package |
 | Task Scheduler | `Voicemeeter Updater - post-restart check`: one-shot, deletes itself |
-| Task Scheduler | `Voicemeeter Updater - finish install`: only if Windows refused the new driver before the restart; runs once at boot, then deletes itself |
+| Task Scheduler | `Voicemeeter Updater - finish install (<product>)`: only if Windows refused the new driver before the restart; runs once at boot, then deletes itself |
 
 ## Troubleshooting
 
@@ -95,7 +95,10 @@ If Voicemeeter is not installed, the script asks which edition to install.
 ## Tested
 
 - Windows 11 x64, Voicemeeter **Potato** 3.1.2.2 → 3.1.3.0, including the automatic device-name repair.
-- **Standard** and **Banana**: package detection, download links, signatures and silent-install switches are checked, but a full update has not been run yet. Feedback is welcome.
+- **Standard** and **Banana**: package detection, download links, signatures and silent-install switches are checked, but a full update has not been run yet.
+- **Matrix / Matrix Coconut** (experimental): detection, download links, signatures and silent-install switches are checked, but a full update has not been run yet.
+
+Feedback is welcome.
 
 ## Credits
 

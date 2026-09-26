@@ -1,33 +1,37 @@
 <#
-    Voicemeeter Updater  v1.0.0-beta
+    Voicemeeter Updater  v1.1.0-beta
     https://github.com/Taimauurufu/Voicemeeter-Updater
-    Updates Voicemeeter (Standard, Banana or Potato) with a SINGLE restart.
+
+    Updates VB-Audio Voicemeeter (Standard, Banana, Potato) and VB-Audio Matrix (Matrix, Coconut)
+    with a SINGLE restart.
 
     VB-Audio's procedure is: uninstall -> restart -> install -> restart.
     This script does:        uninstall -> install  -> ONE restart (you choose now or later).
 
     HOW TO USE
-      Right-click this file -> "Run with PowerShell", then accept the admin prompt.
+      Double-click Update-Voicemeeter.bat (or right-click this .ps1 -> "Run with PowerShell"),
+      then accept the admin prompt.
 
     WHAT IT DOES
-      1. Detects your edition and version, and checks the latest one on vb-audio.com.
-         If you are already up to date, it stops there and changes nothing.
-      2. Downloads the official package and checks VB-Audio's digital signature.
-      3. Backs up your settings (Documents\Voicemeeter + the current live config) and startup shortcut.
-      4. Closes Voicemeeter properly (Remote API "Shutdown", so your settings are saved).
-      5. Silent uninstall + silent install of the new version.
-      6. Restores the "run at startup" shortcut if the uninstaller removed it.
+      1. Finds every VB-Audio product installed (Voicemeeter and/or Matrix) and its edition.
+         Each product is updated IN ITS OWN EDITION: a Banana user gets Banana, never Potato.
+         Nothing is changed for a product that is already up to date.
+      2. Downloads the official packages and checks VB-Audio's digital signature.
+      3. Backs up your settings (Documents folders, live Voicemeeter config) and startup shortcuts.
+      4. Closes the apps properly (Voicemeeter: Remote API "Shutdown", so your settings are saved).
+      5. Silent uninstall + silent install of the new versions.
+      6. Restores the "run at startup" shortcuts if the uninstaller removed them.
       7. Asks you: restart now, or later.
-      8. At your next logon, checks the Voicemeeter audio devices. When the driver itself was updated,
+      8. At your next logon, checks the virtual audio devices. When the driver itself was updated,
          Windows sometimes creates them only at the restart and names them all "Speakers" (apps then
          can't tell them apart). If so, it repairs them automatically: quick reinstall, no restart,
-         then Voicemeeter and your tools are started again.
+         then your apps are started again.
       VB-CABLE / VB-CABLE A+B / Hi-Fi Cable are never touched.
 
     OPTIONS (from a PowerShell prompt)
-      -CheckOnly                   only tell me if an update is available
-      -Force                       reinstall even if already up to date
-      -Edition Standard|Banana|Potato   install / switch to this edition
+      -CheckOnly        only tell me if an update is available
+      -Force            reinstall even if already up to date
+      -Edition <name>   install / switch to: Standard | Banana | Potato | Matrix | Coconut
 
     Files: download in %TEMP%\VoicemeeterUpdater, logs + backups in %LOCALAPPDATA%\VoicemeeterUpdater
     Not affiliated with VB-Audio. Use at your own risk.
@@ -36,15 +40,16 @@
 param(
     [switch]$CheckOnly,
     [switch]$Force,
-    [ValidateSet('Standard', 'Banana', 'Potato')][string]$Edition,
+    [ValidateSet('Standard', 'Banana', 'Potato', 'Matrix', 'Coconut')][string]$Edition,
     # internal: paths of the user who launched the script (kept when elevating)
     [string]$UserDocs, [string]$UserStartup, [string]$UserData, [string]$UserName,
-    # internal: device-name check run once at the first logon after the restart
+    # internal: device check run once at the first logon after the restart
     [switch]$PostRestartCheck, [switch]$RegisterPostRestartCheck, [string]$SetupPath
 )
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference    = 'SilentlyContinue'
+$Version = '1.1.0-beta'
 
 # ---------------------------------------------------------------- elevation
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -68,21 +73,38 @@ if (-not $UserName)    { $UserName    = "$env:USERDOMAIN\$env:USERNAME" }
 $Unattended = $PostRestartCheck -or $RegisterPostRestartCheck
 
 $Host.UI.RawUI.WindowTitle = 'Voicemeeter Updater'
-$Work    = Join-Path $env:TEMP 'VoicemeeterUpdater'
-$Data    = Join-Path $UserData 'VoicemeeterUpdater'
-$Stamp   = Get-Date -Format 'yyyy-MM-dd_HHmmss'
-$Log     = Join-Path $Data "update_$Stamp.log"
-$Marker  = Join-Path $Data 'restart-pending.txt'
-$Docs    = Join-Path $UserDocs 'Voicemeeter'
+$Work      = Join-Path $env:TEMP 'VoicemeeterUpdater'
+$Data      = Join-Path $UserData 'VoicemeeterUpdater'
+$Stamp     = Get-Date -Format 'yyyy-MM-dd_HHmmss'
+$Log       = Join-Path $Data "update_$Stamp.log"
+$Marker    = Join-Path $Data 'restart-pending.txt'
+$CheckFile = Join-Path $Data 'postcheck.json'
+$CheckTask = 'Voicemeeter Updater - post-restart check'
 New-Item -ItemType Directory -Force $Work, $Data | Out-Null
 
-$Editions = [ordered]@{
-    Standard = @{ Page = 'https://vb-audio.com/Voicemeeter/index.htm';  Setup = 'VoicemeeterSetup' }
-    Banana   = @{ Page = 'https://vb-audio.com/Voicemeeter/banana.htm'; Setup = 'VoicemeeterProSetup' }
-    Potato   = @{ Page = 'https://vb-audio.com/Voicemeeter/potato.htm'; Setup = 'Voicemeeter8Setup' }
+# ---------------------------------------------------------------- products
+# Editions are listed from lowest to highest. Setup = installer name (also the one Windows keeps
+# for uninstalling, which tells us the installed edition). Exes = main program of that edition.
+$Products = [ordered]@{
+    Voicemeeter = @{
+        Device = '(?i)^VB-Audio VoiceMeeter'          # its virtual audio devices
+        Docs   = @('Voicemeeter')                      # settings folders in Documents
+        Editions = [ordered]@{
+            Standard = @{ Page = 'https://vb-audio.com/Voicemeeter/index.htm';  Setup = 'VoicemeeterSetup';    Exes = 'voicemeeter_x64', 'voicemeeter' }
+            Banana   = @{ Page = 'https://vb-audio.com/Voicemeeter/banana.htm'; Setup = 'VoicemeeterProSetup'; Exes = 'voicemeeterpro_x64', 'voicemeeterpro' }
+            Potato   = @{ Page = 'https://vb-audio.com/Voicemeeter/potato.htm'; Setup = 'Voicemeeter8Setup';   Exes = 'voicemeeter8x64', 'voicemeeter8' }
+        }
+    }
+    Matrix = @{
+        Device = '(?i)^VB-Audio Matrix'
+        Docs   = @('VBAudioMatrix', 'VB-Audio Matrix', 'Matrix')
+        Editions = [ordered]@{
+            Matrix  = @{ Page = 'https://vb-audio.com/Matrix/index.htm';   Setup = 'VBAudioMatrix_Setup';        Exes = 'VBAudioMatrix_x64', 'VBAudioMatrix' }
+            Coconut = @{ Page = 'https://vb-audio.com/Matrix/coconut.htm'; Setup = 'VBAudioMatrixCoconut_Setup'; Exes = 'VBAudioMatrixCoconut_x64', 'VBAudioMatrixCoconut' }
+        }
+    }
 }
-$AppProcs = 'voicemeeter', 'voicemeeter_x64', 'voicemeeterpro', 'voicemeeterpro_x64', 'voicemeeter8', 'voicemeeter8x64'
-$CheckTask = 'Voicemeeter Updater - post-restart check'
+$VmProcs = 'voicemeeter', 'voicemeeter_x64', 'voicemeeterpro', 'voicemeeterpro_x64', 'voicemeeter8', 'voicemeeter8x64'
 
 # ---------------------------------------------------------------- helpers
 function Log([string]$msg, [string]$color = 'Gray') {
@@ -101,36 +123,85 @@ function ConvertTo-Version($v) {
     try { [version](("$v" -replace '\s', '') -replace ',', '.') } catch { $null }
 }
 
-function Get-InstalledVoicemeeter {
-    $keys = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
-            'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
-    foreach ($k in Get-ItemProperty $keys -ErrorAction SilentlyContinue) {
-        if ("$($k.UninstallString)" -notmatch '(?i)^"?([^"]*\\(Voicemeeter(?:8|Pro)?Setup)\.exe)') { continue }
-        $setup = $Matches[1]; $name = $Matches[2]
-        $ed = ($Editions.Keys | Where-Object { $Editions[$_].Setup -eq $name } | Select-Object -First 1)
-        $ver = if (Test-Path $setup) { ConvertTo-Version (Get-Item $setup).VersionInfo.FileVersion } else { $null }
-        return [pscustomobject]@{ Edition = $ed; Version = $ver; Setup = $setup; Dir = Split-Path $setup }
+function Find-Edition([string]$setupName) {
+    foreach ($p in $Products.Keys) {
+        $rank = 0
+        foreach ($e in $Products[$p].Editions.Keys) {
+            $rank++
+            if ($Products[$p].Editions[$e].Setup -eq $setupName) { return [pscustomobject]@{ Product = $p; Edition = $e; Rank = $rank } }
+        }
     }
     $null
 }
+function Get-ProductOf([string]$edition) { $Products.Keys | Where-Object { $Products[$_].Editions.Contains($edition) } | Select-Object -First 1 }
 
-function Get-Latest([string]$ed) {
+# every VB-Audio product installed, with its edition and version
+function Get-Installed {
+    $keys = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
+            'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
+    $found = [ordered]@{}
+    foreach ($k in Get-ItemProperty $keys -ErrorAction SilentlyContinue) {
+        if ("$($k.UninstallString)" -notmatch '(?i)^"?([^"]*\\(\w+)\.exe)') { continue }
+        $setup = $Matches[1]
+        $e = Find-Edition $Matches[2]
+        if (-not $e -or $found.Contains($e.Product)) { continue }
+        $dir = Split-Path $setup
+        # cross-check with the programs actually present (higher editions also ship the lower ones)
+        $byExe = $null; $r = 0
+        foreach ($ed in $Products[$e.Product].Editions.Keys) {
+            $r++
+            foreach ($x in $Products[$e.Product].Editions[$ed].Exes) { if (Test-Path (Join-Path $dir "$x.exe")) { $byExe = $ed; break } }
+        }
+        $found[$e.Product] = [pscustomobject]@{
+            Product = $e.Product; Edition = $e.Edition; Rank = $e.Rank; EditionByExe = $byExe
+            Version = if (Test-Path $setup) { ConvertTo-Version (Get-Item $setup).VersionInfo.FileVersion } else { $null }
+            Setup = $setup; Dir = $dir
+        }
+    }
+    $found.Values
+}
+
+function Get-Latest([string]$product, [string]$edition) {
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    $html = (Invoke-WebRequest $Editions[$ed].Page -UseBasicParsing).Content
-    $best = [regex]::Matches($html, '(Voicemeeter\w*Setup_v(\d+))\.zip') |
+    $html = (Invoke-WebRequest $Products[$product].Editions[$edition].Page -UseBasicParsing).Content
+    $best = [regex]::Matches($html, '(?i)https?://download\.vb-audio\.com/[\w/]+/(\w+?_v(\d+))\.zip') |
             Sort-Object { [int]$_.Groups[2].Value } | Select-Object -Last 1
     if (-not $best) { return $null }
     $digits = $best.Groups[2].Value
     [pscustomobject]@{
         Zip     = "$($best.Groups[1].Value).zip"
-        Url     = "https://download.vb-audio.com/Download_CABLE/$($best.Groups[1].Value).zip"
+        Url     = $best.Value
         Version = if ($digits.Length -eq 4) { [version]($digits.ToCharArray() -join '.') } else { $null }
     }
 }
 
+function Get-Package($target) {
+    $zipPath = Join-Path $Work $target.Latest.Zip
+    $extract = Join-Path $Work ([IO.Path]::GetFileNameWithoutExtension($target.Latest.Zip))
+    if (-not (Test-Path $zipPath) -or (Get-Item $zipPath).Length -lt 2MB) {
+        Log "Downloading $($target.Latest.Url) ..."
+        if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
+            & curl.exe -L --fail --silent --show-error -o $zipPath $target.Latest.Url
+            if ($LASTEXITCODE -ne 0) { Fail 'Download failed.' }
+        } else {
+            try { Invoke-WebRequest $target.Latest.Url -OutFile $zipPath -UseBasicParsing } catch { Fail "Download failed ($($_.Exception.Message))" }
+        }
+    }
+    if (Test-Path $extract) { Remove-Item $extract -Recurse -Force }
+    Expand-Archive -Path $zipPath -DestinationPath $extract -Force
+    $name = $Products[$target.Product].Editions[$target.Edition].Setup
+    $setup = Get-ChildItem $extract -Recurse -Filter "$name.exe" | Select-Object -First 1
+    if (-not $setup) { Fail "$name.exe not found in the package." }
+    $sig = Get-AuthenticodeSignature $setup.FullName
+    if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'BUREL VINCENT') {
+        Fail "The installer signature is not VB-Audio's ($($sig.Status)). Stopping for safety."
+    }
+    $setup
+}
+
 function Wait-Setup([int]$timeoutSec = 600) {
     $t = 0
-    while (Get-Process | Where-Object { $_.Name -like 'Voicemeeter*Setup*' }) {
+    while (Get-Process | Where-Object { $_.Name -match '(?i)^(Voicemeeter\w*Setup|VBAudioMatrix\w*_Setup)' }) {
         Start-Sleep 2; $t += 2
         if ($t -ge $timeoutSec) { Log "The setup is still running after $timeoutSec s." Yellow; return }
     }
@@ -156,11 +227,38 @@ function Ask-Restart([string]$text) {
         shutdown.exe /r /t 0
         exit 0
     }
-    Log 'Restart postponed. Voicemeeter may not work correctly until you restart Windows.' Yellow
+    Log 'Restart postponed. The updated apps may not work correctly until you restart Windows.' Yellow
 }
 
+function Show-Message([string]$text, [string]$icon = 'Information') {
+    Add-Type -AssemblyName System.Windows.Forms
+    $owner = New-Object System.Windows.Forms.Form
+    $owner.TopMost = $true
+    [void][System.Windows.Forms.MessageBox]::Show($owner, $text, 'Voicemeeter Updater', 'OK', $icon)
+    $owner.Dispose()
+}
+
+# close every program started from a folder (Macro Buttons, VBAN2MIDI, VBANScreen, ...).
+# Third-party tools (e.g. Equalizer APO's VoicemeeterClient) are left alone.
+function Stop-FromFolder([string]$dir) {
+    $prefix = $dir.TrimEnd('\') + '\'
+    $fromFolder = {
+        Get-CimInstance Win32_Process | Where-Object {
+            $_.ExecutablePath -and $_.ExecutablePath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) -and
+            $_.Name -notlike '*setup*' } |
+        ForEach-Object { Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue }
+    }
+    $procs = & $fromFolder
+    if ($procs) {
+        $procs | ForEach-Object { [void]$_.CloseMainWindow() }
+        for ($i = 0; $i -lt 16 -and (& $fromFolder); $i++) { Start-Sleep -Milliseconds 500 }
+        & $fromFolder | Stop-Process -Force -ErrorAction SilentlyContinue
+    }
+}
+
+# Voicemeeter: ask it to shut down through its Remote API, so it saves its settings
 function Close-Voicemeeter([string]$installDir, [string]$saveTo) {
-    $running = Get-Process -Name $AppProcs -ErrorAction SilentlyContinue
+    $running = Get-Process -Name $VmProcs -ErrorAction SilentlyContinue
     $dll = Join-Path $installDir $(if ([Environment]::Is64BitProcess) { 'VoicemeeterRemote64.dll' } else { 'VoicemeeterRemote.dll' })
     if ($running -and (Test-Path $dll)) {
         try {
@@ -185,23 +283,14 @@ function Close-Voicemeeter([string]$installDir, [string]$saveTo) {
                 Log 'Voicemeeter asked to shut down (settings saved).'
             }
         } catch { Log "Remote API not available ($($_.Exception.Message)), closing windows instead." Yellow }
-        for ($i = 0; $i -lt 30 -and (Get-Process -Name $AppProcs -ErrorAction SilentlyContinue); $i++) { Start-Sleep -Milliseconds 500 }
+        for ($i = 0; $i -lt 30 -and (Get-Process -Name $VmProcs -ErrorAction SilentlyContinue); $i++) { Start-Sleep -Milliseconds 500 }
     }
-    # everything else started from the Voicemeeter folder (Macro Buttons, VBAN2MIDI, ...).
-    # Third-party tools (e.g. Equalizer APO's VoicemeeterClient) are left alone.
-    $prefix = $installDir.TrimEnd('\') + '\'
-    $fromPackage = {
-        Get-CimInstance Win32_Process | Where-Object {
-            $_.ExecutablePath -and $_.ExecutablePath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) -and
-            $_.Name -notlike '*setup*' } |
-        ForEach-Object { Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue }
-    }
-    $others = & $fromPackage
-    if ($others) {
-        $others | ForEach-Object { [void]$_.CloseMainWindow() }
-        Start-Sleep 4
-        & $fromPackage | Stop-Process -Force -ErrorAction SilentlyContinue
-    }
+    Stop-FromFolder $installDir
+}
+
+function Close-Product($inst, [string]$saveTo) {
+    Log "Closing $($inst.Product)..."
+    if ($inst.Product -eq 'Voicemeeter') { Close-Voicemeeter $inst.Dir $saveTo } else { Stop-FromFolder $inst.Dir }
 }
 
 function Backup-StartupLinks([string]$to) {
@@ -210,7 +299,7 @@ function Backup-StartupLinks([string]$to) {
     foreach ($dir in $UserStartup, [Environment]::GetFolderPath('CommonStartup')) {
         if (-not (Test-Path $dir)) { continue }
         foreach ($lnk in Get-ChildItem $dir -Filter *.lnk) {
-            if ($shell.CreateShortcut($lnk.FullName).TargetPath -match '(?i)\\VB\\Voicemeeter\\') {
+            if ($shell.CreateShortcut($lnk.FullName).TargetPath -match '(?i)\\VB\\(Voicemeeter|VBAudioMatrix)\\') {
                 $copy = Join-Path $to ('startup_' + $lnk.Name)
                 Copy-Item $lnk.FullName $copy -Force
                 $list += [pscustomobject]@{ Original = $lnk.FullName; Copy = $copy }
@@ -221,18 +310,18 @@ function Backup-StartupLinks([string]$to) {
 }
 function Restore-StartupLinks($list) {
     foreach ($l in $list) {
-        if (-not (Test-Path $l.Original)) { Copy-Item $l.Copy $l.Original; Log 'Startup shortcut restored.' }
+        if (-not (Test-Path $l.Original)) { Copy-Item $l.Copy $l.Original; Log "Startup shortcut restored: $(Split-Path $l.Original -Leaf)" }
     }
 }
 
-function Uninstall-Install([pscustomobject]$inst, [string]$setupExe) {
+function Uninstall-Install([string]$product, $inst, [string]$setupExe) {
     if ($inst -and (Test-Path $inst.Setup)) {
-        Log "Uninstalling Voicemeeter $($inst.Edition) $($inst.Version) (silent)..."
+        Log "Uninstalling $product $($inst.Edition) $($inst.Version) (silent)..."
         Start-Process $inst.Setup -ArgumentList '-u', '-h' -WorkingDirectory $inst.Dir -Wait
         Wait-Setup
-        # a leftover Voicemeeter virtual device would make the installer refuse to install
+        # a leftover virtual device of this product would make the installer refuse to install
         Get-PnpDevice -Class MEDIA -PresentOnly -ErrorAction SilentlyContinue |
-            Where-Object { $_.FriendlyName -match 'Voicemeeter' } | ForEach-Object {
+            Where-Object { $_.FriendlyName -match $Products[$product].Device } | ForEach-Object {
                 Log "Removing leftover device: $($_.FriendlyName)" Yellow
                 pnputil /remove-device "$($_.InstanceId)" | Out-Null
             }
@@ -242,29 +331,27 @@ function Uninstall-Install([pscustomobject]$inst, [string]$setupExe) {
     Wait-Setup
 }
 
-# Voicemeeter virtual audio devices (single VAIO driver, 8 in / 8 out) and their names in Windows
-function Get-VaioEndpoints {
+# virtual audio devices of a product, as Windows names them
+function Get-ProductEndpoints([string]$product) {
     foreach ($flow in 'Render', 'Capture') {
         foreach ($k in Get-ChildItem "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\$flow" -ErrorAction SilentlyContinue) {
             if ((Get-ItemProperty $k.PSPath -ErrorAction SilentlyContinue).DeviceState -ne 1) { continue }
             $props = Get-Item "$($k.PSPath)\Properties" -ErrorAction SilentlyContinue
             if (-not $props) { continue }
-            $ref = "$($props.GetValue('{233164c8-1b2c-4c7d-bc68-b671687a2567},1'))"
-            if ($ref -notmatch '(?i)vbvoicemeetervaio\w*?_(in|out)(\d+)') { continue }
-            [pscustomobject]@{ Flow = $flow; Channel = "$($Matches[1])$($Matches[2])"
-                               Name = "$($props.GetValue('{a45c254e-df1c-4efd-8020-67d146a850e0},2'))" }
+            if ("$($props.GetValue('{b3f8fa53-0004-438e-9003-51a46e139bfc},6'))" -notmatch $Products[$product].Device) { continue }
+            [pscustomobject]@{ Flow = $flow; Name = "$($props.GetValue('{a45c254e-df1c-4efd-8020-67d146a850e0},2'))" }
         }
     }
 }
 # After a driver update, Windows may create the new devices only at the restart, AFTER the
-# installer tried to name them: they all show up as "Speakers" (same name = apps can't tell them apart).
-function Test-VaioNames {
-    $eps = @(Get-VaioEndpoints)
+# installer tried to name them: they then share one generic name ("Speakers"), and apps can't tell them apart.
+function Test-DeviceNames([string]$product) {
+    $eps = @(Get-ProductEndpoints $product)
     foreach ($g in $eps | Group-Object Flow, Name | Where-Object Count -gt 1) {
-        "$($g.Count) $($g.Group[0].Flow) devices share the name '$($g.Group[0].Name)'"
+        "$product : $($g.Count) $($g.Group[0].Flow) devices share the name '$($g.Group[0].Name)'"
     }
-    foreach ($e in $eps | Where-Object { $_.Name -notmatch '(?i)voicemeeter' }) {
-        "$($e.Flow) channel $($e.Channel) is named '$($e.Name)'"
+    if ($product -eq 'Voicemeeter') {
+        foreach ($e in $eps | Where-Object { $_.Name -notmatch '(?i)voicemeeter' }) { "$product : a $($e.Flow) device is named '$($e.Name)'" }
     }
 }
 
@@ -291,206 +378,218 @@ function Start-AsUser($procs) {
     Unregister-ScheduledTask -TaskName $name -Confirm:$false -ErrorAction SilentlyContinue
 }
 
-function Register-PostRestartCheck([string]$setupExe) {
+# $items: list of @{ Product; Setup } -> checked once at the next logon
+function Register-PostRestartCheck($items) {
     $copyScript = Join-Path $Data 'VoicemeeterUpdater.ps1'
     if ($PSCommandPath -ne $copyScript) { Copy-Item $PSCommandPath $copyScript -Force }
     $setupDir = Join-Path $Data 'setup'
     if (Test-Path $setupDir) { Remove-Item $setupDir -Recurse -Force }
     New-Item -ItemType Directory -Force $setupDir | Out-Null
-    Copy-Item $setupExe $setupDir
-    $setupCopy = Join-Path $setupDir (Split-Path $setupExe -Leaf)
+    $list = foreach ($i in $items) {
+        Copy-Item $i.Setup $setupDir
+        [pscustomobject]@{ Product = $i.Product; Setup = (Join-Path $setupDir (Split-Path $i.Setup -Leaf)) }
+    }
+    ConvertTo-Json @($list) | Set-Content -Path $CheckFile -Encoding UTF8
     $arg = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Minimized -File `"$copyScript`" -PostRestartCheck " +
-           "-SetupPath `"$setupCopy`" -UserDocs `"$UserDocs`" -UserStartup `"$UserStartup`" -UserData `"$UserData`" -UserName `"$UserName`""
+           "-UserDocs `"$UserDocs`" -UserStartup `"$UserStartup`" -UserData `"$UserData`" -UserName `"$UserName`""
     $act = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $arg
     $trg = New-ScheduledTaskTrigger -AtLogOn -User $UserName
     $trg.Delay = 'PT45S'
     $prn = New-ScheduledTaskPrincipal -UserId $UserName -LogonType Interactive -RunLevel Highest
     $set = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 30)
     Register-ScheduledTask -TaskName $CheckTask -Action $act -Trigger $trg -Principal $prn -Settings $set -Force | Out-Null
-    Log 'A check of the Voicemeeter devices will run once, at your next logon.'
+    Log 'A check of the virtual audio devices will run once, at your next logon.'
 }
 function Remove-PostRestartCheck {
     Unregister-ScheduledTask -TaskName $CheckTask -Confirm:$false -ErrorAction SilentlyContinue
     Remove-Item (Join-Path $Data 'setup') -Recurse -Force -ErrorAction SilentlyContinue
-}
-
-function Show-Message([string]$text, [string]$icon = 'Information') {
-    Add-Type -AssemblyName System.Windows.Forms
-    $owner = New-Object System.Windows.Forms.Form
-    $owner.TopMost = $true
-    [void][System.Windows.Forms.MessageBox]::Show($owner, $text, 'Voicemeeter Updater', 'OK', $icon)
-    $owner.Dispose()
+    Remove-Item $CheckFile -Force -ErrorAction SilentlyContinue
 }
 
 # ---------------------------------------------------------------- internal modes
 if ($RegisterPostRestartCheck) {
     if (-not $SetupPath -or -not (Test-Path $SetupPath)) { Fail 'RegisterPostRestartCheck needs -SetupPath.' }
-    Register-PostRestartCheck $SetupPath
+    $e = Find-Edition ([IO.Path]::GetFileNameWithoutExtension($SetupPath))
+    if (-not $e) { Fail "Unknown installer: $SetupPath" }
+    Register-PostRestartCheck @([pscustomobject]@{ Product = $e.Product; Setup = $SetupPath })
     Done
 }
 
 if ($PostRestartCheck) {
-    Log '=== Voicemeeter Updater: device check after the restart ===' Cyan
-    for ($t = 0; -not (Get-VaioEndpoints) -and $t -lt 120; $t += 5) { Start-Sleep 5 }
-    $problems = @(Test-VaioNames)
-    if (-not $problems) {
-        Log 'Voicemeeter audio devices are fine. Nothing to do.' Green
-        Remove-PostRestartCheck
-        Done
+    Log "=== Voicemeeter Updater ${Version}: device check after the restart ===" Cyan
+    $items = if (Test-Path $CheckFile) { @(Get-Content $CheckFile -Raw | ConvertFrom-Json) } else { @() }
+    $repaired = @(); $failed = @()
+    foreach ($item in $items) {
+        for ($t = 0; -not (Get-ProductEndpoints $item.Product) -and $t -lt 120; $t += 5) { Start-Sleep 5 }
+        $problems = @(Test-DeviceNames $item.Product)
+        if (-not $problems) { Log "$($item.Product): audio devices are fine." Green; continue }
+        $problems | ForEach-Object { Log "Problem: $_" Yellow }
+        $inst = Get-Installed | Where-Object Product -eq $item.Product
+        $sig = if ($item.Setup -and (Test-Path $item.Setup)) { Get-AuthenticodeSignature $item.Setup } else { $null }
+        if (-not $inst -or -not $sig -or $sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'BUREL VINCENT') {
+            $failed += $item.Product; continue
+        }
+        Log "Repairing $($item.Product): reinstalled once more (same version, no restart needed)..." Cyan
+        # remember what was running, to start it again afterwards (apps, Macro Buttons, clients...)
+        $prefix = $inst.Dir.TrimEnd('\') + '\'
+        $running = @(Get-CimInstance Win32_Process | Where-Object {
+                $_.Name -notlike '*setup*' -and $_.CommandLine -and $_.ExecutablePath -and
+                ($_.ExecutablePath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) -or
+                 ($item.Product -eq 'Voicemeeter' -and $_.Name -like 'voicemeeter*')) } |
+            Sort-Object { if ($_.Name -match '^(voicemeeter(8|pro)?(x64|_x64)?|VBAudioMatrix(Coconut)?(_x64)?)\.exe$') { 0 } else { 1 } })
+        $seen = @{}
+        $running = @($running | Where-Object { -not $seen.ContainsKey($_.CommandLine) -and ($seen[$_.CommandLine] = $true) } |
+            Select-Object ExecutablePath, CommandLine)
+        $links = Backup-StartupLinks $Data
+        Close-Product $inst $null
+        Uninstall-Install $item.Product $inst $item.Setup
+        Start-Sleep 5
+        Restore-StartupLinks $links
+        $left = @(Test-DeviceNames $item.Product)
+        Start-AsUser $running
+        if ($left) { $left | ForEach-Object { Log "Still wrong: $_" Red }; $failed += $item.Product }
+        else { Log "$($item.Product): audio devices repaired." Green; $repaired += $item.Product }
     }
-    $problems | ForEach-Object { Log "Problem: $_" Yellow }
-    $inst = Get-InstalledVoicemeeter
-    $sig = if ($SetupPath -and (Test-Path $SetupPath)) { Get-AuthenticodeSignature $SetupPath } else { $null }
-    if (-not $inst -or -not $sig -or $sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'BUREL VINCENT') {
-        Remove-PostRestartCheck
-        Show-Message "Windows gave the Voicemeeter audio devices wrong names after the update.`n`nPlease reinstall Voicemeeter (run the updater with -Force)." 'Warning'
-        Done 1
-    }
-    Log 'Repairing: Voicemeeter is reinstalled once more (same version, no restart needed)...' Cyan
-    # remember what was running, to start it again afterwards (Voicemeeter, Macro Buttons, clients...)
-    $prefix = $inst.Dir.TrimEnd('\') + '\'
-    $running = @(Get-CimInstance Win32_Process | Where-Object {
-            $_.Name -notlike '*setup*' -and $_.CommandLine -and $_.ExecutablePath -and
-            ($_.Name -like 'voicemeeter*' -or $_.ExecutablePath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) } |
-        Sort-Object { if ($_.Name -match '^voicemeeter(8|pro)?(x64|_x64)?\.exe$') { 0 } else { 1 } })
-    $seen = @{}
-    $running = @($running | Where-Object { -not $seen.ContainsKey($_.CommandLine) -and ($seen[$_.CommandLine] = $true) } |
-        Select-Object ExecutablePath, CommandLine)
-    $links = Backup-StartupLinks $Data
-    Close-Voicemeeter $inst.Dir $null
-    Uninstall-Install $inst $SetupPath
-    Start-Sleep 5
-    Restore-StartupLinks $links
-    $left = @(Test-VaioNames)
-    Start-AsUser $running
     Remove-PostRestartCheck
-    if ($left) {
-        $left | ForEach-Object { Log "Still wrong: $_" Red }
-        Show-Message "Voicemeeter was reinstalled but some audio devices still have wrong names.`n`nSee the log: $Log" 'Warning'
+    if ($failed) {
+        Show-Message "Windows gave some $($failed -join ' / ') audio devices wrong names after the update, and the automatic repair did not work.`n`nPlease run the updater again with -Force.`n`nLog: $Log" 'Warning'
         Done 1
     }
-    Log 'Voicemeeter audio devices repaired.' Green
-    Show-Message "Voicemeeter audio devices were repaired (Windows had reset their names after the driver update).`n`nEverything is ready."
+    if ($repaired) {
+        Show-Message "$($repaired -join ' / ') audio devices were repaired (Windows had reset their names after the driver update).`n`nEverything is ready."
+    }
     Done
 }
 
 # ---------------------------------------------------------------- 1. state
 Log '==============================================' Cyan
-Log '  Voicemeeter Updater v1.0.0-beta (one restart only)' Cyan
+Log "  Voicemeeter Updater v$Version (one restart only)" Cyan
 Log '==============================================' Cyan
 
 if (Test-RestartPending) {
-    Log 'Voicemeeter was already updated, but Windows has not been restarted since.' Yellow
-    Ask-Restart "Voicemeeter was already updated.`n`nWindows must be restarted to finish the update.`nSave your work first.`n`nRestart now?"
+    Log 'An update was already installed, but Windows has not been restarted since.' Yellow
+    Ask-Restart "An update was already installed.`n`nWindows must be restarted to finish it.`nSave your work first.`n`nRestart now?"
     Done
 }
 
-$inst = Get-InstalledVoicemeeter
-if ($inst) { Log "Installed : Voicemeeter $($inst.Edition) $($inst.Version)" }
-else       { Log 'Installed : none' }
+$installed = @(Get-Installed)
+foreach ($i in $installed) {
+    Log "Installed : $($i.Product) $($i.Edition) $($i.Version)"
+    if ($i.EditionByExe -and $i.EditionByExe -ne $i.Edition) {
+        Log "            (programs of $($i.EditionByExe) found too; the registered edition $($i.Edition) is kept)" DarkGray
+    }
+}
+if (-not $installed) { Log 'Installed : no Voicemeeter or Matrix found' }
 
-$target = if ($Edition) { $Edition } elseif ($inst -and $inst.Edition) { $inst.Edition } else { $null }
-if (-not $target) {
-    if ($CheckOnly) { Log 'Voicemeeter is not installed.' Yellow; Done }
+# one target per product: the installed edition, unless -Edition asks for another one
+$targets = @(foreach ($i in $installed) { [pscustomobject]@{ Product = $i.Product; Edition = $i.Edition; Inst = $i; Latest = $null; Action = '' } })
+if ($Edition) {
+    $p = Get-ProductOf $Edition
+    $t = $targets | Where-Object Product -eq $p
+    if ($t) { $t.Edition = $Edition }
+    else { $targets += [pscustomobject]@{ Product = $p; Edition = $Edition; Inst = $null; Latest = $null; Action = '' } }
+}
+if (-not $targets) {
+    if ($CheckOnly) { Done }
     Write-Host ''
-    Write-Host 'Voicemeeter is not installed. Which edition do you want to install?'
-    Write-Host '  1 = Voicemeeter (Standard)   2 = Banana   3 = Potato   Q = quit'
-    switch ((Read-Host 'Choice').Trim()) {
-        '1' { $target = 'Standard' } '2' { $target = 'Banana' } '3' { $target = 'Potato' }
-        default { Log 'Cancelled.'; Done }
+    Write-Host 'Nothing to update. Which product do you want to install?'
+    Write-Host '  1 = Voicemeeter (Standard)   2 = Voicemeeter Banana   3 = Voicemeeter Potato'
+    Write-Host '  4 = Matrix                   5 = Matrix Coconut       Q = quit'
+    $pick = switch ((Read-Host 'Choice').Trim()) { '1' { 'Standard' } '2' { 'Banana' } '3' { 'Potato' } '4' { 'Matrix' } '5' { 'Coconut' } default { $null } }
+    if (-not $pick) { Log 'Cancelled.'; Done }
+    $targets += [pscustomobject]@{ Product = (Get-ProductOf $pick); Edition = $pick; Inst = $null; Latest = $null; Action = '' }
+}
+
+foreach ($t in $targets) {
+    try { $t.Latest = Get-Latest $t.Product $t.Edition } catch { Fail "Cannot reach vb-audio.com ($($_.Exception.Message))" }
+    if (-not $t.Latest) { Fail "Download link not found on $($Products[$t.Product].Editions[$t.Edition].Page) (the website may have changed)." }
+    $i = $t.Inst
+    $t.Action = if (-not $i) { 'install' }
+                elseif ($i.Edition -ne $t.Edition) { 'switch' }
+                elseif (-not $i.Version -or -not $t.Latest.Version -or $i.Version -lt $t.Latest.Version) { 'update' }
+                elseif ($Force) { 'reinstall' }
+                else { 'none' }
+    $lat = if ($t.Latest.Version) { $t.Latest.Version } else { $t.Latest.Zip }
+    switch ($t.Action) {
+        'none'      { Log "Latest    : $($t.Product) $($t.Edition) $lat -> up to date" Green }
+        'update'    { Log "Latest    : $($t.Product) $($t.Edition) $lat -> UPDATE available" Yellow }
+        'reinstall' { Log "Latest    : $($t.Product) $($t.Edition) $lat -> will be reinstalled (-Force)" Yellow }
+        'install'   { Log "Latest    : $($t.Product) $($t.Edition) $lat -> will be INSTALLED" Yellow }
+        'switch'    { Log "Latest    : $($t.Product) $($t.Edition) $lat -> will REPLACE $($t.Inst.Edition)" Yellow }
     }
 }
 
-try { $latest = Get-Latest $target } catch { Fail "Cannot reach vb-audio.com ($($_.Exception.Message))" }
-if (-not $latest) { Fail "Download link not found on $($Editions[$target].Page) (the website may have changed)." }
-Log "Latest    : Voicemeeter $target $(if ($latest.Version) { $latest.Version } else { $latest.Zip })"
-
-$sameEdition = $inst -and $inst.Edition -eq $target
-if ($sameEdition -and $inst.Version -and $latest.Version -and $inst.Version -ge $latest.Version -and -not $Force) {
-    Log 'You are up to date. Nothing to do.' Green
-    Done
-}
-if ($CheckOnly) {
-    if ($inst -and -not $sameEdition) { Log "Voicemeeter $target can be installed (it would replace $($inst.Edition))." Yellow }
-    else { Log 'An update is available. Run the script without -CheckOnly to install it.' Yellow }
-    Done
-}
+$todo = @($targets | Where-Object Action -ne 'none')
+if (-not $todo) { Log 'Everything is up to date. Nothing to do.' Green; Done }
+if ($CheckOnly) { Log 'Run the script without -CheckOnly to install the update(s).' Yellow; Done }
 
 Write-Host ''
-if ($inst -and -not $sameEdition) { Log "This will REPLACE Voicemeeter $($inst.Edition) with Voicemeeter $target." Yellow }
-Write-Host 'Voicemeeter will be closed: audio going through it stops until Windows is restarted.' -ForegroundColor Yellow
+$names = ($todo | ForEach-Object { "$($_.Product) $($_.Edition)" }) -join ' + '
+Write-Host "About to install: $names" -ForegroundColor Cyan
+Write-Host 'These apps will be closed: audio going through them stops until Windows is restarted.' -ForegroundColor Yellow
 if ((Read-Host 'Continue? (Y/N)').Trim() -notmatch '^[yYoO]') { Log 'Cancelled.'; Done }
 
 # ---------------------------------------------------------------- 2. download
-$zipPath = Join-Path $Work $latest.Zip
-$extract = Join-Path $Work ([IO.Path]::GetFileNameWithoutExtension($latest.Zip))
-if (-not (Test-Path $zipPath) -or (Get-Item $zipPath).Length -lt 5MB) {
-    Log "Downloading $($latest.Url) ..."
-    if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
-        & curl.exe -L --fail --silent --show-error -o $zipPath $latest.Url
-        if ($LASTEXITCODE -ne 0) { Fail 'Download failed.' }
-    } else {
-        try { Invoke-WebRequest $latest.Url -OutFile $zipPath -UseBasicParsing } catch { Fail "Download failed ($($_.Exception.Message))" }
-    }
+foreach ($t in $todo) {
+    $s = Get-Package $t
+    $v = ConvertTo-Version $s.VersionInfo.FileVersion
+    Log "Package OK: $($s.Name) $v, signed by VB-Audio (Vincent Burel)." Green
+    $t | Add-Member -NotePropertyName SetupFile -NotePropertyValue $s.FullName
+    $t | Add-Member -NotePropertyName NewVersion -NotePropertyValue $v
+    if ($t.Action -eq 'update' -and $t.Inst.Version -and $v -and $t.Inst.Version -ge $v) { $t.Action = 'none'; Log "$($t.Product) is already up to date." Green }
 }
-if (Test-Path $extract) { Remove-Item $extract -Recurse -Force }
-Expand-Archive -Path $zipPath -DestinationPath $extract -Force
-$setup = Get-ChildItem $extract -Recurse -Filter "$($Editions[$target].Setup).exe" | Select-Object -First 1
-if (-not $setup) { Fail "$($Editions[$target].Setup).exe not found in the package." }
-
-$sig = Get-AuthenticodeSignature $setup.FullName
-if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'BUREL VINCENT') {
-    Fail "The installer signature is not VB-Audio's ($($sig.Status)). Stopping for safety."
-}
-$newVer = ConvertTo-Version $setup.VersionInfo.FileVersion
-Log "Package OK: $($setup.Name) $newVer, signed by VB-Audio (Vincent Burel)." Green
-if ($sameEdition -and $inst.Version -and $newVer -and $inst.Version -ge $newVer -and -not $Force) {
-    Log 'You are up to date. Nothing to do.' Green
-    Done
-}
+$todo = @($todo | Where-Object Action -ne 'none')
+if (-not $todo) { Log 'Everything is up to date. Nothing to do.' Green; Done }
 
 # ---------------------------------------------------------------- 3. backup
 $backup = Join-Path $Data "backup_$Stamp"
 New-Item -ItemType Directory -Force $backup | Out-Null
-if (Test-Path $Docs) {
-    robocopy $Docs (Join-Path $backup 'Documents_Voicemeeter') /E /R:1 /W:1 /NFL /NDL /NJH /NJS /NP `
-        /XF *.mp3 *.wav *.wma *.aac *.m4a *.flac *.ogg *.aif *.aiff | Out-Null
+foreach ($t in $todo) {
+    foreach ($d in $Products[$t.Product].Docs) {
+        $src = Join-Path $UserDocs $d
+        if (Test-Path $src) {
+            robocopy $src (Join-Path $backup "Documents_$d") /E /R:1 /W:1 /NFL /NDL /NJH /NJS /NP `
+                /XF *.mp3 *.wav *.wma *.aac *.m4a *.flac *.ogg *.aif *.aiff | Out-Null
+        }
+    }
 }
 $startupLinks = Backup-StartupLinks $backup
 Log "Settings backed up to $backup" Green
 
 # ---------------------------------------------------------------- 4. close
-Log 'Closing Voicemeeter...'
-$installDir = if ($inst) { $inst.Dir } else { $null }
-if ($installDir) { Close-Voicemeeter $installDir (Join-Path $backup 'CurrentSettings.xml') }
+foreach ($t in $todo | Where-Object Inst) { Close-Product $t.Inst (Join-Path $backup "CurrentSettings_$($t.Product).xml") }
 
 # ---------------------------------------------------------------- 5. uninstall + install
-Uninstall-Install $inst $setup.FullName
-
-$now = Get-InstalledVoicemeeter
-if ($now -and $now.Edition -eq $target -and $now.Version -eq $newVer) {
-    Log "Voicemeeter $target $newVer installed." Green
-} else {
-    # Fallback: the installer can refuse while the old driver is still loaded -> install at next boot
-    Log 'The installer did not finish now: it will run automatically at the next Windows start.' Yellow
-    $pending = Join-Path $env:ProgramData 'VoicemeeterUpdater\pending'
-    if (Test-Path $pending) { Remove-Item $pending -Recurse -Force }
-    New-Item -ItemType Directory -Force $pending | Out-Null
-    Copy-Item $setup.FullName $pending
-    $exe = Join-Path $pending $setup.Name
-    $act = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument "/c `"`"$exe`" -i -h & schtasks /delete /tn `"Voicemeeter Updater - finish install`" /f`""
-    $trg = New-ScheduledTaskTrigger -AtStartup
-    $prn = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -RunLevel Highest
-    Register-ScheduledTask -TaskName 'Voicemeeter Updater - finish install' -Action $act -Trigger $trg -Principal $prn -Force | Out-Null
+$checks = @()
+foreach ($t in $todo) {
+    Uninstall-Install $t.Product $t.Inst $t.SetupFile
+    $now = Get-Installed | Where-Object Product -eq $t.Product
+    if ($now -and $now.Edition -eq $t.Edition -and $now.Version -eq $t.NewVersion) {
+        Log "$($t.Product) $($t.Edition) $($t.NewVersion) installed." Green
+    } else {
+        # Fallback: the installer can refuse while the old driver is still loaded -> install at next boot
+        Log "$($t.Product): the installer did not finish now, it will run automatically at the next Windows start." Yellow
+        $pending = Join-Path $env:ProgramData "VoicemeeterUpdater\pending_$($t.Product)"
+        if (Test-Path $pending) { Remove-Item $pending -Recurse -Force }
+        New-Item -ItemType Directory -Force $pending | Out-Null
+        Copy-Item $t.SetupFile $pending
+        $exe = Join-Path $pending (Split-Path $t.SetupFile -Leaf)
+        $task = "Voicemeeter Updater - finish install ($($t.Product))"
+        $act = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument "/c `"`"$exe`" -i -h & schtasks /delete /tn `"$task`" /f`""
+        $trg = New-ScheduledTaskTrigger -AtStartup
+        $prn = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -RunLevel Highest
+        Register-ScheduledTask -TaskName $task -Action $act -Trigger $trg -Principal $prn -Force | Out-Null
+    }
+    $checks += [pscustomobject]@{ Product = $t.Product; Setup = $t.SetupFile }
 }
 Set-Content -Path $Marker -Value (Get-Date -Format 's')
-Register-PostRestartCheck $setup.FullName
+Register-PostRestartCheck $checks
 
 # ---------------------------------------------------------------- 6. restore
 Restore-StartupLinks $startupLinks
-if (Test-Path (Join-Path $backup 'Documents_Voicemeeter')) {
+foreach ($d in Get-ChildItem $backup -Directory -Filter 'Documents_*') {
     # only brings back files that disappeared, never overwrites
-    robocopy (Join-Path $backup 'Documents_Voicemeeter') $Docs /E /XC /XN /XO /R:1 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
+    robocopy $d.FullName (Join-Path $UserDocs ($d.Name -replace '^Documents_', '')) /E /XC /XN /XO /R:1 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
 }
 # keep the last 3 backups
 Get-ChildItem $Data -Directory -Filter 'backup_*' | Sort-Object Name -Descending | Select-Object -Skip 3 |
@@ -498,6 +597,7 @@ Get-ChildItem $Data -Directory -Filter 'backup_*' | Sort-Object Name -Descending
 
 # ---------------------------------------------------------------- 7. restart
 Log ''
-Log 'Update done. ONE restart is needed to load the new audio driver.' Cyan
-Ask-Restart "Voicemeeter $target $newVer has been installed.`n`nWindows must be restarted to finish the update (audio driver).`nSave your work first.`n`nRestart now?`n`nYes = restart now`nNo = restart later"
+Log 'Update done. ONE restart is needed to load the new audio driver(s).' Cyan
+$done = ($todo | ForEach-Object { "$($_.Product) $($_.Edition) $($_.NewVersion)" }) -join "`n"
+Ask-Restart "Installed:`n$done`n`nWindows must be restarted to finish the update (audio drivers).`nSave your work first.`n`nRestart now?`n`nYes = restart now`nNo = restart later"
 Done

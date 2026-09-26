@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.1.1-beta (unreleased)
+## 1.1.1-beta (2026-09-26)
 
 - Every edition tested on real updates in a VM: Standard, Banana, Potato (including the old 3-driver 3.0.1.0), Matrix, Matrix Coconut, and Voicemeeter + Matrix together. Matrix support is no longer experimental.
 - Logs: "Matrix 1.0.2.6" instead of "Matrix Matrix 1.0.2.6"

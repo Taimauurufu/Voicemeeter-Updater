@@ -56,6 +56,8 @@ exit /b
       -CheckOnly        only tell me if an update is available
       -Force            reinstall even if already up to date
       -Edition <name>   install / switch to: Standard | Banana | Potato | Matrix | Coconut
+      -Yes              don't ask anything (for scripts)
+      -Restart <mode>   Ask (default) | Now | Later
 
     Files: download in %TEMP%\VoicemeeterUpdater, logs + backups in %LOCALAPPDATA%\VoicemeeterUpdater
     Not affiliated with VB-Audio. Use at your own risk.
@@ -65,6 +67,8 @@ param(
     [switch]$CheckOnly,
     [switch]$Force,
     [ValidateSet('Standard', 'Banana', 'Potato', 'Matrix', 'Coconut')][string]$Edition,
+    [switch]$Yes,
+    [ValidateSet('Ask', 'Now', 'Later')][string]$Restart = 'Ask',
     # internal: paths of the user who launched the script (kept when elevating)
     [string]$UserDocs, [string]$UserStartup, [string]$UserData, [string]$UserName,
     # internal: device check run once at the first logon after the restart
@@ -86,6 +90,8 @@ if (-not $isAdmin) {
     if ($CheckOnly) { $a += '-CheckOnly' }
     if ($Force)     { $a += '-Force' }
     if ($Edition)   { $a += '-Edition', $Edition }
+    if ($Yes)       { $a += '-Yes' }
+    $a += '-Restart', $Restart
     try { Start-Process powershell.exe -Verb RunAs -ArgumentList $a }
     catch { Write-Host 'Administrator rights are required to update Voicemeeter.' -ForegroundColor Red; Read-Host 'Press Enter to close' | Out-Null }
     exit
@@ -94,7 +100,7 @@ if (-not $UserDocs)    { $UserDocs    = [Environment]::GetFolderPath('MyDocument
 if (-not $UserStartup) { $UserStartup = [Environment]::GetFolderPath('Startup') }
 if (-not $UserData)    { $UserData    = $env:LOCALAPPDATA }
 if (-not $UserName)    { $UserName    = "$env:USERDOMAIN\$env:USERNAME" }
-$Unattended = $PostRestartCheck -or $RegisterPostRestartCheck
+$Unattended = $PostRestartCheck -or $RegisterPostRestartCheck -or $Yes
 
 $Host.UI.RawUI.WindowTitle = 'Voicemeeter Updater'
 $Work      = Join-Path $env:TEMP 'VoicemeeterUpdater'
@@ -240,6 +246,8 @@ function Test-RestartPending {
 }
 
 function Ask-Restart([string]$text) {
+    if ($Restart -eq 'Now') { Log 'Restarting now (-Restart Now)...' Cyan; shutdown.exe /r /t 5; exit 0 }
+    if ($Restart -eq 'Later') { Log 'Restart postponed (-Restart Later). Restart Windows to finish the update.' Yellow; return }
     Add-Type -AssemblyName System.Windows.Forms
     $owner = New-Object System.Windows.Forms.Form
     $owner.TopMost = $true
@@ -338,21 +346,48 @@ function Restore-StartupLinks($list) {
     }
 }
 
+function Stop-WindowsAudio {
+    # stopping the endpoint builder also stops "Windows Audio" (it depends on it)
+    Stop-Service AudioEndpointBuilder -Force -ErrorAction SilentlyContinue
+    Stop-Service Audiosrv -Force -ErrorAction SilentlyContinue
+    for ($i = 0; $i -lt 20 -and (Get-Process audiodg -ErrorAction SilentlyContinue); $i++) { Start-Sleep -Milliseconds 500 }
+}
+function Start-WindowsAudio {
+    Start-Service AudioEndpointBuilder -ErrorAction SilentlyContinue
+    Start-Service Audiosrv -ErrorAction SilentlyContinue
+}
+
 function Uninstall-Install([string]$product, $inst, [string]$setupExe) {
-    if ($inst -and (Test-Path $inst.Setup)) {
-        Log "Uninstalling $product $($inst.Edition) $($inst.Version) (silent)..."
-        Start-Process $inst.Setup -ArgumentList '-u', '-h' -WorkingDirectory $inst.Dir -Wait
+    $audioStopped = $false
+    try {
+        if ($inst -and (Test-Path $inst.Setup)) {
+            # Every app playing or recording through the virtual devices (Discord, games, browsers, OBS...) keeps the
+            # driver in use. Removing it in that state can crash Windows (seen with the Voicemeeter VAIO driver 3.3.1.9:
+            # bugcheck 0xD1 in vbvoicemeetervaio64_win10.sys), and the new devices then only appear at the restart,
+            # without their names. Stopping Windows audio first closes every stream, so the driver is released cleanly.
+            Log 'Stopping Windows audio during the driver swap (every app loses sound for a few seconds)...'
+            Stop-WindowsAudio
+            $audioStopped = $true
+            Log "Uninstalling $product $($inst.Edition) $($inst.Version) (silent)..."
+            Start-Process $inst.Setup -ArgumentList '-u', '-h' -WorkingDirectory $inst.Dir -Wait
+            Wait-Setup
+            # a leftover virtual device of this product would make the installer refuse to install
+            Get-PnpDevice -Class MEDIA -PresentOnly -ErrorAction SilentlyContinue |
+                Where-Object { $_.FriendlyName -match $Products[$product].Device } | ForEach-Object {
+                    Log "Removing leftover device: $($_.FriendlyName)" Yellow
+                    pnputil /remove-device "$($_.InstanceId)" | Out-Null
+                }
+            # audio back on before installing: the new devices must be created now so the installer can name them
+            Start-WindowsAudio
+            $audioStopped = $false
+            Log 'Windows audio restarted.'
+        }
+        Log "Installing $(Split-Path $setupExe -Leaf) (silent)..."
+        Start-Process $setupExe -ArgumentList '-i', '-h' -WorkingDirectory (Split-Path $setupExe) -Wait
         Wait-Setup
-        # a leftover virtual device of this product would make the installer refuse to install
-        Get-PnpDevice -Class MEDIA -PresentOnly -ErrorAction SilentlyContinue |
-            Where-Object { $_.FriendlyName -match $Products[$product].Device } | ForEach-Object {
-                Log "Removing leftover device: $($_.FriendlyName)" Yellow
-                pnputil /remove-device "$($_.InstanceId)" | Out-Null
-            }
+    } finally {
+        if ($audioStopped) { Start-WindowsAudio; Log 'Windows audio restarted.' }
     }
-    Log "Installing $(Split-Path $setupExe -Leaf) (silent)..."
-    Start-Process $setupExe -ArgumentList '-i', '-h' -WorkingDirectory (Split-Path $setupExe) -Wait
-    Wait-Setup
 }
 
 # virtual audio devices of a product, as Windows names them
@@ -441,6 +476,7 @@ if ($RegisterPostRestartCheck) {
 
 if ($PostRestartCheck) {
     Log "=== Voicemeeter Updater ${Version}: device check after the restart ===" Cyan
+    [void](Test-RestartPending)   # Windows has restarted since the update: clears the "restart pending" marker
     $items = if (Test-Path $CheckFile) { @(Get-Content $CheckFile -Raw | ConvertFrom-Json) } else { @() }
     $repaired = @(); $failed = @()
     foreach ($item in $items) {
@@ -515,6 +551,7 @@ if ($Edition) {
 }
 if (-not $targets) {
     if ($CheckOnly) { Done }
+    if ($Yes) { Fail 'Nothing installed: use -Edition to choose what to install.' }
     Write-Host ''
     Write-Host 'Nothing to update. Which product do you want to install?'
     Write-Host '  1 = Voicemeeter (Standard)   2 = Voicemeeter Banana   3 = Voicemeeter Potato'
@@ -551,7 +588,7 @@ Write-Host ''
 $names = ($todo | ForEach-Object { "$($_.Product) $($_.Edition)" }) -join ' + '
 Write-Host "About to install: $names" -ForegroundColor Cyan
 Write-Host 'These apps will be closed: audio going through them stops until Windows is restarted.' -ForegroundColor Yellow
-if ((Read-Host 'Continue? (Y/N)').Trim() -notmatch '^[yYoO]') { Log 'Cancelled.'; Done }
+if (-not $Yes -and (Read-Host 'Continue? (Y/N)').Trim() -notmatch '^[yYoO]') { Log 'Cancelled.'; Done }
 
 # ---------------------------------------------------------------- 2. download
 foreach ($t in $todo) {
@@ -588,6 +625,12 @@ $checks = @()
 foreach ($t in $todo) {
     Uninstall-Install $t.Product $t.Inst $t.SetupFile
     $now = Get-Installed | Where-Object Product -eq $t.Product
+    # diagnostic: was the virtual audio driver replaced right away, or only at the restart?
+    foreach ($d in Get-PnpDevice -Class MEDIA -PresentOnly -ErrorAction SilentlyContinue | Where-Object { $_.FriendlyName -match $Products[$t.Product].Device }) {
+        $pending = "$($d.Problem)" -notin '', '0', 'CM_PROB_NONE'
+        Log ("  virtual device: $($d.FriendlyName) [$($d.Status)]" + $(if ($pending) { " -> new driver loads at the restart ($($d.Problem))" } else { ' -> new driver active now' }))
+    }
+    Log "  audio devices visible now: $(@(Get-ProductEndpoints $t.Product).Count)"
     if ($now -and $now.Edition -eq $t.Edition -and $now.Version -eq $t.NewVersion) {
         Log "$($t.Product) $($t.Edition) $($t.NewVersion) installed." Green
     } else {

@@ -10,17 +10,25 @@ VB-Audio's recommended way to update is *uninstall → restart → install → r
 
 ## Quick start
 
-1. Download **`Update-Voicemeeter.ps1`** from the [latest release](../../releases/latest).
-2. Right-click it, then choose **Run with PowerShell**. Accept the admin prompt.
+1. Download **`Update-Voicemeeter.bat`** from the [latest release](../../releases/latest).
+2. **Double-click it**, then accept the admin prompt.
 3. Confirm with `Y` and wait about 1 minute.
 4. When asked, choose **Restart now** or **Later**.
 
 If you are already on the latest version, the script tells you so and **changes nothing**.
 
-> **No "Run with PowerShell" in the menu?** Open PowerShell in the download folder and run:
-> ```powershell
-> powershell -ExecutionPolicy Bypass -File .\Update-Voicemeeter.ps1
-> ```
+> **"Windows protected your PC"?** This is SmartScreen, which shows up for any file downloaded from the internet that isn't signed. Click **More info → Run anyway**. You can open the `.bat` in Notepad to read it first: it is a small launcher followed by the PowerShell script.
+
+<details>
+<summary>Prefer the plain PowerShell script?</summary>
+
+Download `Update-Voicemeeter.ps1` instead. Double-clicking a `.ps1` only opens it in an editor, so right-click it and choose **Run with PowerShell**, or run this in the download folder:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\Update-Voicemeeter.ps1
+```
+Both files do exactly the same thing: `tools\Build-Bat.ps1` builds the `.bat` from the `.ps1`.
+</details>
 
 ## What it does
 
@@ -52,10 +60,11 @@ To handle this, the script schedules a **one-time check at your next logon**. If
 Run these from a PowerShell window:
 
 ```powershell
-.\Update-Voicemeeter.ps1 -CheckOnly          # only tell me if an update is available
-.\Update-Voicemeeter.ps1 -Force              # reinstall even if up to date (also fixes broken device names)
-.\Update-Voicemeeter.ps1 -Edition Potato     # install or switch edition: Standard | Banana | Potato
+.\Update-Voicemeeter.bat -CheckOnly          # only tell me if an update is available
+.\Update-Voicemeeter.bat -Force              # reinstall even if up to date (also fixes broken device names)
+.\Update-Voicemeeter.bat -Edition Potato     # install or switch edition: Standard | Banana | Potato
 ```
+The same options work with `Update-Voicemeeter.ps1`.
 
 If Voicemeeter is not installed, the script asks which edition to install.
 

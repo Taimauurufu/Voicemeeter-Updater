@@ -11,3 +11,4 @@ First release.
 - Asks "restart now or later"
 - One-time check at the next logon that repairs the Voicemeeter devices when Windows names them all "Speakers" after a driver update (no extra restart)
 - Options: `-CheckOnly`, `-Force`, `-Edition`
+- `Update-Voicemeeter.bat`: an all-in-one version you can simply double-click, built from the `.ps1` by `tools\Build-Bat.ps1`

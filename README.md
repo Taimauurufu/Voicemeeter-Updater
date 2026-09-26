@@ -40,7 +40,7 @@ Both files do exactly the same thing: `tools\Build-Bat.ps1` builds the `.bat` fr
 | 2. Download | Gets the **official** packages and checks that the installer carries **VB-Audio's digital signature**. It refuses to continue otherwise. |
 | 3. Backup | Saves `Documents\Voicemeeter` (settings, scenes, Macro Buttons…) and the Matrix settings folder, the **current live Voicemeeter configuration** (exported through its Remote API) and the "run at startup" shortcuts. |
 | 4. Close | Asks Voicemeeter to shut down through its Remote API, so your last changes are saved. It then closes Matrix, Macro Buttons, VBAN2MIDI and the other tools from the VB-Audio folders. |
-| 5. Update | Runs a silent uninstall, then a silent install of each new version. |
+| 5. Update | Stops Windows audio for a few seconds, runs a silent uninstall, starts audio again, then runs a silent install of each new version. |
 | 6. Restore | Puts back the startup shortcut, which the uninstaller deletes, and any settings file that disappeared. Nothing is overwritten. |
 | 7. Restart | Asks **restart now or later**. |
 | 8. After the restart | Checks the virtual audio devices once, at your next logon, and repairs them if needed (see below). |
@@ -55,7 +55,9 @@ When an update also changes the version of the **Voicemeeter VAIO driver** (Matr
 - VB-Audio's `VBDeviceCheck.exe` reports `Pin Name redundancy`;
 - apps using **MME** see the same name 8 times and all end up on the same device.
 
-To handle this, the script schedules a **one-time check at your next logon**. If the names are wrong, it reinstalls Voicemeeter silently once more. The new driver is already loaded at that point, so **no extra restart is needed**. It then starts again what was running (Voicemeeter, Macro Buttons, clients…) and shows a "repaired" message. If the names are fine, the check simply deletes itself.
+**Since v1.1.0-beta, this is prevented at the source.** The problem, and a possible Windows crash (blue screen `0xD1` in the old VAIO driver), happens when an app (Discord, a game, a browser...) still uses a Voicemeeter device while the old driver is removed. The script now stops Windows audio for a few seconds during the driver swap, so the old driver is released cleanly and the new devices are named right away.
+
+As a safety net, the script also schedules a **one-time check at your next logon**. If the names are wrong, it reinstalls Voicemeeter silently once more. The new driver is already loaded at that point, so **no extra restart is needed**. It then starts again what was running (Voicemeeter, Macro Buttons, clients…) and shows a "repaired" message. If the names are fine, the check simply deletes itself.
 
 ## Options
 
@@ -65,6 +67,7 @@ Run these from a PowerShell window:
 .\Update-Voicemeeter.bat -CheckOnly          # only tell me if an update is available
 .\Update-Voicemeeter.bat -Force              # reinstall even if up to date (also fixes broken device names)
 .\Update-Voicemeeter.bat -Edition Potato     # install or switch edition: Standard | Banana | Potato | Matrix | Coconut
+.\Update-Voicemeeter.bat -Yes -Restart Later # no questions, restart later yourself (Restart: Ask | Now | Later)
 ```
 The same options work with `Update-Voicemeeter.ps1`.
 

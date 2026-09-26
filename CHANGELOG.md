@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.1.0-beta (unreleased)
+## 1.1.0-beta (2026-09-26)
 
 - **Fix: possible Windows crash (blue screen) during the update.** If an app (Discord, a game, a browser...) was playing or recording through a Voicemeeter device, removing the old driver could crash Windows. Reproduced in a VM: bugcheck `0xD1` in `vbvoicemeetervaio64_win10.sys` 3.3.1.9. The same situation also made the new devices appear only at the restart, all named "Speakers". Windows audio is now stopped for a few seconds while the driver is swapped, so the driver is released cleanly and the new devices get their names right away.
 - **New options:** `-Yes` (no questions) and `-Restart Ask|Now|Later`

@@ -4,13 +4,15 @@ Update **Voicemeeter** (Standard, Banana or Potato) with **one restart instead o
 
 VB-Audio's recommended way to update is *uninstall → restart → install → restart*. This PowerShell script uninstalls the old version and installs the new one in the same Windows session. After that, **a single restart** finishes the job, and you choose whether it happens now or later.
 
+> **🧪 Beta.** Fully tested on Voicemeeter **Potato** (Windows 11 x64). Standard and Banana are supported but not fully tested yet, and more Voicemeeter versions will be added later. If something goes wrong, please [open an issue](../../issues) and attach the log from `%LOCALAPPDATA%\VoicemeeterUpdater`.
+
 > Not affiliated with VB-Audio. Voicemeeter is © Vincent Burel / VB-Audio Software. This script only automates the official installer downloaded from [vb-audio.com](https://vb-audio.com/Voicemeeter/).
 
 ---
 
 ## Quick start
 
-1. Download **`Update-Voicemeeter.bat`** from the [latest release](../../releases/latest).
+1. Download **`Update-Voicemeeter.bat`** from the [Releases page](../../releases) (take the most recent one).
 2. **Double-click it**, then accept the admin prompt.
 3. Confirm with `Y` and wait about 1 minute.
 4. When asked, choose **Restart now** or **Later**.

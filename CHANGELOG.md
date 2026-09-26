@@ -1,8 +1,8 @@
 # Changelog
 
-## 1.0.0 (2026-09-26)
+## 1.0.0-beta (2026-09-26)
 
-First release.
+First public beta. Fully tested on Voicemeeter Potato (Windows 11 x64). Standard and Banana are supported, but a full update has not been tested on them yet.
 
 - Updates Voicemeeter Standard, Banana or Potato with a single restart (silent uninstall + install)
 - Checks the installer's VB-Audio digital signature

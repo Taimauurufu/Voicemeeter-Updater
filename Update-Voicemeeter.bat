@@ -23,7 +23,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%VMU_PS1%" %*
 exit /b
 #PS1-BELOW
 <#
-    Voicemeeter Updater  v1.0.0
+    Voicemeeter Updater  v1.0.0-beta
     https://github.com/Taimauurufu/Voicemeeter-Updater
     Updates Voicemeeter (Standard, Banana or Potato) with a SINGLE restart.
 
@@ -400,7 +400,7 @@ if ($PostRestartCheck) {
 
 # ---------------------------------------------------------------- 1. state
 Log '==============================================' Cyan
-Log '  Voicemeeter Updater v1.0.0 (one restart only)' Cyan
+Log '  Voicemeeter Updater v1.0.0-beta (one restart only)' Cyan
 Log '==============================================' Cyan
 
 if (Test-RestartPending) {
